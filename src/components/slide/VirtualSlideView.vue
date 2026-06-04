@@ -140,7 +140,8 @@ function slideNext(next: boolean) {
   if (!element) return
 
   const visibleCount = Math.max(1, Math.trunc(element.clientWidth / itemStep.value))
-  const currentIndex = element.scrollLeft === 0 ? 0 : Math.trunc((element.scrollLeft + itemStep.value / 2) / itemStep.value)
+  const currentIndex =
+    element.scrollLeft === 0 ? 0 : Math.trunc((element.scrollLeft + itemStep.value / 2) / itemStep.value)
   let targetLeft = 0
 
   if (next) {
@@ -285,10 +286,17 @@ watch(
 <style lang="scss" scoped>
 .slider-container {
   position: relative;
+  isolation: isolate;
   margin-block-end: 8px;
+
+  --slider-shadow-bleed-start: 28px;
+  --slider-shadow-bleed-end: 56px;
 }
 
 .slider-header {
+  // 阴影缓冲区会把滚动区域上移，标题层级需高于滚动区域以保留按钮点击。
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -340,20 +348,23 @@ watch(
 
 .slider-content-wrapper {
   position: relative;
+  z-index: 1;
   inline-size: 100%;
 }
 
 .slider-content-container {
   position: relative;
-  overflow: hidden;
   inline-size: 100%;
 }
 
 .slider-content {
-  overflow: scroll hidden !important;
+  // 横向滚动会让纵向 visible 被浏览器计算成可裁剪区域，这里用缓冲区承接卡片阴影。
+  margin-block: calc(var(--slider-shadow-bleed-start) * -1) calc(var(--slider-shadow-bleed-end) * -1);
   -ms-overflow-style: none !important;
+  overflow-x: auto;
+  overflow-y: hidden;
   overscroll-behavior-x: contain !important;
-  padding-block: 8px;
+  padding-block: var(--slider-shadow-bleed-start) var(--slider-shadow-bleed-end);
   padding-inline: 12px;
   scroll-behavior: smooth;
   scrollbar-width: none !important;
@@ -380,6 +391,11 @@ watch(
   flex: 0 0 auto;
 }
 
+.virtual-slide-item,
+.loading-track > * {
+  padding-block-end: 12px;
+}
+
 .nav-button {
   position: absolute;
   z-index: 20;
@@ -399,8 +415,12 @@ watch(
   pointer-events: none;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 10%);
   transform: translateY(-50%);
-  transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), background-color 0.3s ease,
-    box-shadow 0.3s ease, border-color 0.3s ease;
+  transition:
+    opacity 0.3s ease,
+    transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1),
+    background-color 0.3s ease,
+    box-shadow 0.3s ease,
+    border-color 0.3s ease;
 
   svg {
     block-size: 22px;

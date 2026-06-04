@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import type { CSSProperties } from 'vue'
 import {
   themeCustomizerPrimaryColors,
   useThemeCustomizer,
   type ThemeCustomizerLayout,
+  type ThemeCustomizerShadow,
   type ThemeCustomizerSkin,
   type ThemeCustomizerTheme,
 } from '@/composables/useThemeCustomizer'
@@ -27,18 +29,41 @@ const emit = defineEmits<{
 
 const customColorInput = ref<HTMLInputElement | null>(null)
 
-const { isCustomized, resetSettings, setLayout, setPrimaryColor, setSemiDarkMenu, setSkin, setTheme, settings } =
-  useThemeCustomizer()
+const {
+  isCustomized,
+  resetSettings,
+  setLayout,
+  setPrimaryColor,
+  setSemiDarkMenu,
+  setShadow,
+  setSkin,
+  setTheme,
+  settings,
+} = useThemeCustomizer()
 const { appMode } = usePWA()
 const { t } = useI18n()
 const { global: globalTheme } = useTheme()
 const display = useDisplay()
 const defaultPrimaryColor = themeCustomizerPrimaryColors[0].value
+const customizerViewportHeight = ref('100dvh')
 
 const drawer = computed({
   get: () => props.modelValue,
   set: value => emit('update:modelValue', value),
 })
+
+function getVisibleViewportHeight() {
+  if (typeof window === 'undefined') return '100dvh'
+
+  const height = window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight
+
+  return height > 0 ? `${Math.round(height)}px` : '100dvh'
+}
+
+// iOS 小屏的可见视口会随地址栏和独立模式 safe area 变化，面板高度需要跟随真实可见高度。
+function syncCustomizerViewportHeight() {
+  customizerViewportHeight.value = getVisibleViewportHeight()
+}
 
 // 将主题定制器打开状态同步到根节点，供全局悬浮按钮避让右侧面板。
 function syncThemeCustomizerOpenState(isOpen: boolean) {
@@ -61,9 +86,37 @@ function clearThemeCustomizerOpenState() {
 }
 
 watch(drawer, syncThemeCustomizerOpenState, { immediate: true })
+watch(drawer, isOpen => {
+  if (isOpen) nextTick(syncCustomizerViewportHeight)
+})
+
+onMounted(() => {
+  syncCustomizerViewportHeight()
+  window.addEventListener('resize', syncCustomizerViewportHeight)
+  window.addEventListener('orientationchange', syncCustomizerViewportHeight)
+  window.visualViewport?.addEventListener('resize', syncCustomizerViewportHeight)
+  window.visualViewport?.addEventListener('scroll', syncCustomizerViewportHeight)
+})
+
 onScopeDispose(clearThemeCustomizerOpenState)
+onScopeDispose(() => {
+  if (typeof window === 'undefined') return
+
+  window.removeEventListener('resize', syncCustomizerViewportHeight)
+  window.removeEventListener('orientationchange', syncCustomizerViewportHeight)
+  window.visualViewport?.removeEventListener('resize', syncCustomizerViewportHeight)
+  window.visualViewport?.removeEventListener('scroll', syncCustomizerViewportHeight)
+})
 
 const customizerContainer = computed(() => (appMode.value ? VDialog : VNavigationDrawer))
+
+const customizerContainerStyle = computed<CSSProperties>(() => {
+  if (!appMode.value) return {}
+
+  return {
+    '--theme-customizer-viewport-height': customizerViewportHeight.value,
+  }
+})
 
 const customizerContainerProps = computed(() => {
   if (appMode.value && display.mdAndDown.value) {
@@ -98,6 +151,30 @@ const skinOptions = computed<Array<{ title: string; value: ThemeCustomizerSkin }
   { title: t('theme.customizer.skinBordered'), value: 'bordered' },
 ])
 
+const shadowOptions = computed<
+  Array<{
+    title: string
+    value: ThemeCustomizerShadow
+  }>
+>(() => [
+  {
+    title: t('theme.customizer.shadowNone'),
+    value: 'none',
+  },
+  {
+    title: t('theme.customizer.shadowLow'),
+    value: 'low',
+  },
+  {
+    title: t('theme.customizer.shadowMedium'),
+    value: 'medium',
+  },
+  {
+    title: t('theme.customizer.shadowHigh'),
+    value: 'high',
+  },
+])
+
 const layoutOptions = computed<Array<{ icon: string; title: string; value: ThemeCustomizerLayout }>>(() => [
   { title: t('theme.customizer.layoutVertical'), value: 'vertical', icon: 'mdi-dock-left' },
   { title: t('theme.customizer.layoutCollapsed'), value: 'collapsed', icon: 'mdi-dock-window' },
@@ -109,6 +186,7 @@ const showLayoutSection = computed(() => !appMode.value)
 const hasAppModeCustomization = computed(() => {
   return (
     settings.value.primaryColor !== defaultPrimaryColor ||
+    settings.value.shadow !== 'none' ||
     settings.value.skin !== 'default' ||
     settings.value.theme !== 'auto'
   )
@@ -150,6 +228,7 @@ async function handleResetSettings() {
 
   // App 模式共享定制器，但保留桌面导航相关偏好，只重置 App 侧可调整的外观设置。
   await setPrimaryColor(defaultPrimaryColor)
+  await setShadow('none')
   await setSkin('default')
   await setTheme('auto')
 }
@@ -165,7 +244,12 @@ async function handleResetSettings() {
       />
     </Transition>
 
-    <component :is="customizerContainer" v-model="drawer" v-bind="customizerContainerProps">
+    <component
+      :is="customizerContainer"
+      v-model="drawer"
+      v-bind="customizerContainerProps"
+      :style="customizerContainerStyle"
+    >
       <div class="theme-customizer-panel" :class="{ 'theme-customizer-panel--dialog': appMode }">
         <div class="theme-customizer-header py-5 px-4">
           <div>
@@ -262,6 +346,35 @@ async function handleResetSettings() {
               </div>
             </div>
 
+            <VDivider class="mt-7" />
+
+            <h3 class="theme-customizer-section-title">{{ t('theme.customizer.shadow') }}</h3>
+            <div class="theme-customizer-preview-grid theme-customizer-preview-grid--shadow">
+              <div
+                v-for="shadow in shadowOptions"
+                :key="shadow.value"
+                class="theme-customizer-preview-option"
+                :class="{ 'is-active': settings.shadow === shadow.value }"
+                @click="setShadow(shadow.value)"
+              >
+                <span class="theme-customizer-shadow-scene" :class="`theme-customizer-shadow-scene--${shadow.value}`">
+                  <span class="theme-customizer-shadow-scene__panel">
+                    <span class="theme-customizer-shadow-scene__panel-line" />
+                    <span
+                      class="theme-customizer-shadow-scene__panel-line theme-customizer-shadow-scene__panel-line--short"
+                    />
+                  </span>
+
+                  <span class="theme-customizer-shadow-scene__card">
+                    <span class="theme-customizer-shadow-scene__badge" />
+                    <span class="theme-customizer-shadow-scene__line theme-customizer-shadow-scene__line--short" />
+                    <span class="theme-customizer-shadow-scene__line" />
+                  </span>
+                </span>
+                <span>{{ shadow.title }}</span>
+              </div>
+            </div>
+
             <div v-if="showSemiDarkMenuOption" class="theme-customizer-semi-dark">
               <span>{{ t('theme.customizer.semiDarkMenu') }}</span>
               <VSwitch
@@ -333,7 +446,16 @@ async function handleResetSettings() {
 }
 
 .theme-customizer-dialog-overlay {
+  --theme-customizer-viewport-height: 100dvh;
+
   z-index: 12000 !important;
+}
+
+.theme-customizer-dialog-overlay > .v-overlay__content {
+  overflow: hidden;
+  block-size: var(--theme-customizer-viewport-height);
+  margin-block: 0 !important;
+  max-block-size: var(--theme-customizer-viewport-height);
 }
 
 .theme-customizer-panel {
@@ -349,11 +471,15 @@ async function handleResetSettings() {
   border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
   border-radius: 16px;
   background: rgb(var(--v-theme-surface));
-  block-size: 100dvh;
+  block-size: var(--theme-customizer-viewport-height, 100dvh);
+  max-block-size: var(--theme-customizer-viewport-height, 100dvh);
+  /* fullscreen dialog 会贴到 viewport-fit=cover 顶部，iOS 需要在面板内部避开系统状态栏。 */
+  padding-block-start: env(safe-area-inset-top);
 }
 
 .theme-customizer-panel--dialog .theme-customizer-body {
-  block-size: calc(100dvh - 80px - env(safe-area-inset-bottom) - env(safe-area-inset-top));
+  block-size: auto;
+  padding-block-end: env(safe-area-inset-bottom);
 }
 
 .theme-customizer-drawer.v-theme--transparent,
@@ -573,6 +699,10 @@ html[data-theme='transparent'] .v-overlay__content:has(.theme-customizer-drawer)
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.theme-customizer-preview-grid--shadow {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .theme-customizer-preview-option {
   align-items: flex-start;
   padding: 0;
@@ -584,7 +714,8 @@ html[data-theme='transparent'] .v-overlay__content:has(.theme-customizer-drawer)
     background: transparent;
     box-shadow: none !important;
 
-    .theme-customizer-mini-layout {
+    .theme-customizer-mini-layout,
+    .theme-customizer-shadow-scene {
       border-width: 2px;
       border-color: rgb(var(--v-theme-primary));
       background: rgba(var(--v-theme-primary), 0.04);
@@ -632,6 +763,11 @@ html[data-theme='transparent'] .v-overlay__content:has(.theme-customizer-drawer)
 .theme-customizer-mini-layout--horizontal {
   grid-template-columns: 1fr;
   grid-template-rows: 24% 1fr;
+
+  .mini-sidebar {
+    flex-direction: row;
+    align-items: center;
+  }
 }
 
 .mini-sidebar,
@@ -667,10 +803,111 @@ html[data-theme='transparent'] .v-overlay__content:has(.theme-customizer-drawer)
   }
 }
 
-.theme-customizer-mini-layout--horizontal {
-  .mini-sidebar {
-    flex-direction: row;
-    align-items: center;
+.theme-customizer-shadow-scene {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(var(--v-theme-on-surface), 0.02), rgba(var(--v-theme-on-surface), 0.06)),
+    rgb(var(--v-theme-surface));
+  block-size: 110px;
+  inline-size: 100%;
+  min-inline-size: 0;
+}
+
+.theme-customizer-shadow-scene__panel,
+.theme-customizer-shadow-scene__card {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+  background: rgb(var(--v-theme-surface));
+  box-shadow: none;
+  transition: box-shadow 0.18s ease;
+}
+
+.theme-customizer-shadow-scene__panel {
+  padding: 12px;
+  gap: 8px;
+  inset-block-start: 16px;
+  inset-inline: 14px;
+  min-block-size: 54px;
+}
+
+.theme-customizer-shadow-scene__card {
+  gap: 8px;
+  inset-block-end: 12px;
+  inset-inline: 20px 16px;
+  min-block-size: 46px;
+  padding-block: 10px;
+  padding-inline: 12px;
+}
+
+.theme-customizer-shadow-scene__panel-line,
+.theme-customizer-shadow-scene__line,
+.theme-customizer-shadow-scene__badge {
+  display: block;
+  border-radius: 999px;
+  background: rgba(var(--v-theme-on-surface), 0.1);
+}
+
+.theme-customizer-shadow-scene__badge {
+  block-size: 6px;
+  inline-size: 34%;
+  min-inline-size: 28px;
+}
+
+.theme-customizer-shadow-scene__panel-line,
+.theme-customizer-shadow-scene__line {
+  block-size: 7px;
+}
+
+.theme-customizer-shadow-scene__panel-line--short,
+.theme-customizer-shadow-scene__line--short {
+  inline-size: 62%;
+}
+
+.theme-customizer-shadow-scene--low {
+  .theme-customizer-shadow-scene__panel {
+    box-shadow:
+      0 8px 18px rgba(var(--v-theme-on-surface), 0.08),
+      0 2px 6px rgba(var(--v-theme-on-surface), 0.05);
+  }
+
+  .theme-customizer-shadow-scene__card {
+    box-shadow:
+      0 10px 22px rgba(var(--v-theme-on-surface), 0.1),
+      0 4px 10px rgba(var(--v-theme-on-surface), 0.06);
+  }
+}
+
+.theme-customizer-shadow-scene--medium {
+  .theme-customizer-shadow-scene__panel {
+    box-shadow:
+      0 12px 28px rgba(var(--v-theme-on-surface), 0.12),
+      0 4px 12px rgba(var(--v-theme-on-surface), 0.08);
+  }
+
+  .theme-customizer-shadow-scene__card {
+    box-shadow:
+      0 16px 34px rgba(var(--v-theme-on-surface), 0.14),
+      0 6px 16px rgba(var(--v-theme-on-surface), 0.09);
+  }
+}
+
+.theme-customizer-shadow-scene--high {
+  .theme-customizer-shadow-scene__panel {
+    box-shadow:
+      0 16px 38px rgba(var(--v-theme-on-surface), 0.16),
+      0 6px 18px rgba(var(--v-theme-on-surface), 0.1);
+  }
+
+  .theme-customizer-shadow-scene__card {
+    box-shadow:
+      0 22px 48px rgba(var(--v-theme-on-surface), 0.18),
+      0 8px 22px rgba(var(--v-theme-on-surface), 0.12);
   }
 }
 
