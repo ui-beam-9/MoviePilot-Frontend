@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { Component } from 'vue'
 import { VForm } from 'vuetify/components/VForm'
 import { useAuthStore, useUserStore } from '@/stores'
 import { authState, userState } from '@/stores/types'
@@ -14,6 +15,7 @@ import { getNavMenus } from '@/router/i18n-menu'
 import { filterMenusByPermission, DEFAULT_PERMISSIONS } from '@/utils/permission'
 import type { ApiResponse } from '@/api/types'
 import { openSharedDialog } from '@/composables/useSharedDialog'
+import { loadRemoteComponentFromModule, type RemoteModule } from '@/utils/federationLoader'
 
 const LoginMfaDialog = defineAsyncComponent(() => import('@/components/dialog/LoginMfaDialog.vue'))
 
@@ -87,6 +89,40 @@ let manualAbortController: AbortController | null = null
 // 标记当前是否有手动模式的 PassKey 请求正在进行
 let isManualPassKeyActive = false
 
+interface LoginAuthProvider {
+  id: string
+  type: 'system' | 'plugin'
+  method?: string
+  name: string
+  icon?: string
+  enabled?: boolean
+  plugin_id?: string
+  component?: string
+  remote?: RemoteModule
+}
+
+interface PluginAuthPayload {
+  ticket?: string
+}
+
+// 登录认证提供方
+const authProviders = ref<LoginAuthProvider[]>([])
+const selectedAuthProvider = ref<LoginAuthProvider | null>(null)
+const RemoteAuthView = shallowRef<Component | null>(null)
+const pluginAuthDialog = ref(false)
+const pluginAuthLoading = ref(false)
+const pluginAuthError = ref('')
+
+const systemPasskeyProvider = computed(() =>
+  authProviders.value.find(provider => provider.type === 'system' && provider.method === 'passkey'),
+)
+const pluginAuthProviders = computed(() =>
+  authProviders.value.filter(provider => provider.type === 'plugin' && provider.remote && provider.enabled !== false),
+)
+const showPasskeyLogin = computed(
+  () => !!systemPasskeyProvider.value?.enabled,
+)
+
 // 生成 MFA 共享弹窗使用的最新 props。
 function getMfaDialogProps() {
   return {
@@ -125,6 +161,75 @@ function closeMfaDialog() {
   mfaDialog.value = false
   mfaDialogController?.close()
   mfaDialogController = null
+}
+
+// 加载未登录可用的认证提供方。
+async function loadAuthProviders() {
+  try {
+    const result = (await api.get('auth/providers')) as LoginAuthProvider[]
+    authProviders.value = Array.isArray(result) ? result : []
+  } catch (error) {
+    console.error('加载认证提供方失败:', error)
+    authProviders.value = []
+  }
+}
+
+// 打开插件认证联邦页面。
+async function openPluginAuth(provider: LoginAuthProvider) {
+  if (!provider.remote) return
+  selectedAuthProvider.value = provider
+  RemoteAuthView.value = null
+  pluginAuthError.value = ''
+  pluginAuthLoading.value = true
+  pluginAuthDialog.value = true
+  try {
+    RemoteAuthView.value = (await loadRemoteComponentFromModule(
+      provider.remote,
+      provider.component || 'AuthPage',
+    )) as Component
+  } catch (error: any) {
+    console.error('加载插件认证页面失败:', error)
+    pluginAuthError.value = error?.message || t('login.authFailure')
+  } finally {
+    pluginAuthLoading.value = false
+  }
+}
+
+// 关闭插件认证弹窗。
+function closePluginAuth() {
+  pluginAuthDialog.value = false
+  selectedAuthProvider.value = null
+  RemoteAuthView.value = null
+  pluginAuthError.value = ''
+}
+
+// 兑换插件认证票据并完成系统登录。
+async function exchangePluginAuthTicket(ticket: string) {
+  pluginAuthLoading.value = true
+  try {
+    const response: any = await api.post('auth/exchange', { ticket })
+    closePluginAuth()
+    await handleLoginSuccess(response)
+  } catch (error: any) {
+    console.error('插件认证票据兑换失败:', error)
+    pluginAuthError.value = error?.response?.data?.detail || error?.message || t('login.authFailure')
+  } finally {
+    pluginAuthLoading.value = false
+  }
+}
+
+// 处理插件认证成功事件。
+async function handlePluginAuthenticated(payload: PluginAuthPayload) {
+  if (!payload?.ticket) {
+    pluginAuthError.value = t('login.authFailure')
+    return
+  }
+  await exchangePluginAuthTicket(payload.ticket)
+}
+
+// 处理插件认证失败事件。
+function handlePluginAuthError(error: any) {
+  pluginAuthError.value = error?.message || String(error || '') || t('login.authFailure')
 }
 
 // PassKey 认证核心函数 - 处理 WebAuthn 认证流程
@@ -507,13 +612,13 @@ watch([mfaPasskeyLoading, errorMessage, () => form.value.otp_password], () => {
   mfaDialogController?.updateProps(getMfaDialogProps())
 })
 
-// OIDC 登录是否启用
+// [Backup] 硬编码 OIDC 登录逻辑（已由插件认证框架替代，保留作为备份参考）
+// 启用方式：取消下方注释，并在 onMounted 中恢复 checkOidcEnabled() 调用
+/*
 const oidcEnabled = ref(false)
 const oidcLoading = ref(false)
-// 标记 postMessage 是否已收到，避免轮询中误移除监听器导致消息丢失
 let oidcMessageReceived = false
 
-// 检查 OIDC 是否启用
 async function checkOidcEnabled() {
   try {
     const result: { [key: string]: any } = await api.get('login/oidc/enabled')
@@ -523,11 +628,8 @@ async function checkOidcEnabled() {
   }
 }
 
-// 处理 OIDC 弹窗回调消息
 function handleOidcMessage(event: MessageEvent) {
-  // 只处理 oidc_callback 类型的消息
   if (event.data?.type !== 'oidc_callback') return
-  // 移除监听
   window.removeEventListener('message', handleOidcMessage)
   oidcMessageReceived = true
   oidcLoading.value = false
@@ -554,7 +656,6 @@ function handleOidcMessage(event: MessageEvent) {
   }
 }
 
-// OIDC 登录成功处理
 async function handleOidcLoginSuccess(data: Record<string, any>) {
   const userPayload: userState = {
     superUser: !!data.super_user,
@@ -593,7 +694,6 @@ async function handleOidcLoginSuccess(data: Record<string, any>) {
   }
 }
 
-// OIDC 登录（弹窗方式）
 function loginWithOIDC() {
   oidcLoading.value = true
   oidcMessageReceived = false
@@ -607,27 +707,23 @@ function loginWithOIDC() {
     'width=600,height=700,left=200,top=100',
   )
 
-  // 如果弹窗被浏览器阻止
   if (!popup) {
     oidcLoading.value = false
     window.removeEventListener('message', handleOidcMessage)
     errorMessage.value = t('login.authFailure')
   }
 
-  // 轮询检测弹窗是否已关闭
   const popupCheck = setInterval(() => {
     if (popup?.closed) {
       clearInterval(popupCheck)
       window.removeEventListener('message', handleOidcMessage)
 
-      // 如果已通过 postMessage 收到结果，不再处理
       if (oidcMessageReceived) {
         oidcMessageReceived = false
         return
       }
 
       if (oidcLoading.value) {
-        // 先检查 localStorage 中是否有错误信息（跨域 postMessage 的备选方案）
         const storedError = localStorage.getItem('oidc_callback_error')
         if (storedError) {
           try {
@@ -657,7 +753,6 @@ function loginWithOIDC() {
           return
         }
 
-        // 重新读取 Pinia 持久化的 auth store，检查是否已登录成功
         authStore.$hydrate()
         if (authStore.token) {
           userStore.$hydrate()
@@ -674,19 +769,16 @@ function loginWithOIDC() {
             errorMessage.value = t('login.noPermission')
           }
         }
-        // 没有错误也没有 token：用户手动关闭弹窗
         oidcLoading.value = false
         errorMessage.value = t('login.oidcAuthCanceled')
       }
     }
   }, 500)
 }
+*/
 
 // 自动登录
 onMounted(async () => {
-  // 检查 OIDC 是否启用
-  await checkOidcEnabled()
-
   // 获取token和remember状态
   const token = authStore.token
   const remember = authStore.remember
@@ -696,6 +788,9 @@ onMounted(async () => {
     router.push('/')
     return
   }
+
+  // 加载系统和插件声明的未登录认证入口
+  await loadAuthProviders()
 
   // 初始化 Conditional UI 的 PassKey 自动填充
   await initConditionalPasskey()
@@ -836,11 +931,37 @@ onUnmounted(() => {
                 </VBtn>
 
                 <!-- or divider -->
-                <div class="or-divider my-4">
+                <div v-if="showPasskeyLogin || pluginAuthProviders.length > 0" class="or-divider my-4">
                   <span class="or-divider-text">{{ t('login.orDivider') }}</span>
                 </div>
 
-                <!-- passkey & OIDC login buttons -->
+                <!-- passkey login button -->
+                <VBtn
+                  v-if="showPasskeyLogin"
+                  block
+                  variant="outlined"
+                  color="success"
+                  class="passkey-btn"
+                  prepend-icon="material-symbols:passkey"
+                  :loading="passkeyLoading"
+                  @click="loginWithPassKey(false)"
+                >
+                  {{ t('login.loginWithPasskey') }}
+                </VBtn>
+                <VBtn
+                  v-for="provider in pluginAuthProviders"
+                  :key="provider.id"
+                  block
+                  variant="outlined"
+                  color="primary"
+                  class="mt-3"
+                  :prepend-icon="provider.icon || 'mdi-login-variant'"
+                  :loading="pluginAuthLoading && selectedAuthProvider?.id === provider.id"
+                  @click="openPluginAuth(provider)"
+                >
+                  {{ provider.name }}
+                </VBtn>
+                <!-- [Backup] 硬编码 OIDC 登录按钮（已由插件认证框架替代，保留作为备份参考）
                 <div :class="oidcEnabled ? 'd-flex gap-3' : ''">
                   <VBtn
                     variant="outlined"
@@ -855,7 +976,6 @@ onUnmounted(() => {
                   >
                     {{ t('login.loginWithPasskey') }}
                   </VBtn>
-
                   <VBtn
                     v-if="oidcEnabled"
                     variant="outlined"
@@ -869,6 +989,7 @@ onUnmounted(() => {
                     {{ t('login.loginWithOIDC') }}
                   </VBtn>
                 </div>
+                -->
                 <VAlert v-if="errorMessage" type="error" variant="tonal" class="mt-3">
                   {{ errorMessage }}
                 </VAlert>
@@ -878,6 +999,32 @@ onUnmounted(() => {
         </VCardText>
       </VCard>
     </div>
+    <VDialog v-model="pluginAuthDialog" max-width="520" persistent>
+      <VCard>
+        <VCardItem>
+          <VCardTitle>{{ selectedAuthProvider?.name }}</VCardTitle>
+          <template #append>
+            <VBtn icon="mdi-close" variant="text" @click="closePluginAuth" />
+          </template>
+        </VCardItem>
+        <VCardText>
+          <VSkeletonLoader v-if="pluginAuthLoading && !RemoteAuthView" type="article" />
+          <VAlert v-else-if="pluginAuthError" type="error" variant="tonal">
+            {{ pluginAuthError }}
+          </VAlert>
+          <component
+            v-else-if="RemoteAuthView && selectedAuthProvider"
+            :is="RemoteAuthView"
+            :api="api"
+            :provider="selectedAuthProvider"
+            :plugin-id="selectedAuthProvider.plugin_id"
+            @authenticated="handlePluginAuthenticated"
+            @error="handlePluginAuthError"
+            @close="closePluginAuth"
+          />
+        </VCardText>
+      </VCard>
+    </VDialog>
   </div>
 </template>
 
