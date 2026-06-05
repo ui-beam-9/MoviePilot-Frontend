@@ -317,6 +317,7 @@ function resolveDynamicMenuItemTitle(item: DynamicButtonMenuItem) {
 .footer-nav-card {
   position: relative;
   overflow: hidden;
+  border-radius: 9999px !important;
   backdrop-filter: blur(24px);
   background-color: rgba(var(--v-theme-surface), 0.6);
   pointer-events: auto;
