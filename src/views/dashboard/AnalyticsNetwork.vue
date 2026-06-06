@@ -171,32 +171,44 @@ useKeepAliveRefresh(refresh)
 </script>
 
 <template>
-  <VHover>
-    <template #default="hover">
-      <VCard v-bind="hover.props" class="dashboard-chart-card">
-        <VCardItem>
-          <VCardTitle>{{ t('dashboard.network') }}</VCardTitle>
-        </VCardItem>
-        <VCardText>
-          <VApexChart type="line" :options="chartOptions" :series="series" :height="150" />
-          <div class="d-flex justify-space-between">
-            <p class="text-center font-weight-medium mb-0">
-              <span class="text-warning">{{ t('dashboard.upload') }}</span
-              >：{{ formatBytes(currentUpload) }}
-            </p>
-            <p class="text-center font-weight-medium mb-0">
-              <span class="text-info">{{ t('dashboard.download') }}</span
-              >：{{ formatBytes(currentDownload) }}
-            </p>
-          </div>
-        </VCardText>
-      </VCard>
-    </template>
-  </VHover>
+  <VCard class="dashboard-chart-card">
+    <VCardItem>
+      <VCardTitle>{{ t('dashboard.network') }}</VCardTitle>
+    </VCardItem>
+    <VCardText class="dashboard-chart-content">
+      <div class="dashboard-chart-plot">
+        <VApexChart type="line" :options="chartOptions" :series="series" height="100%" />
+      </div>
+      <div class="d-flex justify-space-between">
+        <p class="text-center font-weight-medium mb-0">
+          <span class="text-warning">{{ t('dashboard.upload') }}</span
+          >：{{ formatBytes(currentUpload) }}
+        </p>
+        <p class="text-center font-weight-medium mb-0">
+          <span class="text-info">{{ t('dashboard.download') }}</span
+          >：{{ formatBytes(currentDownload) }}
+        </p>
+      </div>
+    </VCardText>
+  </VCard>
 </template>
 
 <style scoped>
-.dashboard-chart-card {
-  min-block-size: 256px;
+.dashboard-chart-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-block-size: 0;
+}
+
+.dashboard-chart-plot {
+  flex: 1 1 auto;
+  min-block-size: 0;
+}
+
+.dashboard-chart-plot :deep(.vue-apexcharts),
+.dashboard-chart-plot :deep(.apexcharts-canvas),
+.dashboard-chart-plot :deep(svg) {
+  block-size: 100% !important;
 }
 </style>

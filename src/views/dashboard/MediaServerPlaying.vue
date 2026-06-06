@@ -61,34 +61,37 @@ onActivated(() => {
 </script>
 
 <template>
-  <VHover v-if="playingList.length > 0">
-    <template #default="hover">
-      <VCard v-bind="hover.props">
-        <VCardItem>
-          <VCardTitle>{{ t('dashboard.playing') }}</VCardTitle>
-        </VCardItem>
+  <VCard v-if="playingList.length > 0" class="dashboard-media-card">
+    <VCardItem>
+      <VCardTitle>{{ t('dashboard.playing') }}</VCardTitle>
+    </VCardItem>
 
-        <div class="dashboard-card-grid-wrap">
-          <ProgressiveCardGrid
-            :items="playingList"
-            :get-item-key="item => item.id || item.link || item.title"
-            :min-item-width="240"
-            :estimated-item-height="160"
-            tabindex="0"
-          >
-            <template #default="{ item }">
-              <BackdropCard :media="item" height="10rem" />
-            </template>
-          </ProgressiveCardGrid>
-        </div>
-      </VCard>
-    </template>
-  </VHover>
+    <div class="px-3 pb-3">
+      <ProgressiveCardGrid
+        class="dashboard-media-grid"
+        :items="playingList"
+        :get-item-key="item => item.id || item.link || item.title"
+        :min-item-width="240"
+        :estimated-item-height="160"
+        tabindex="0"
+      >
+        <template #default="{ item }">
+          <BackdropCard :media="item" height="10rem" />
+        </template>
+      </ProgressiveCardGrid>
+    </div>
+  </VCard>
 </template>
 
 <style scoped>
-.dashboard-card-grid-wrap {
-  /* 用内边距提供卡片留白，避免 100% 宽度网格叠加横向外边距后在 iOS 小屏溢出。 */
-  padding: 0 0.75rem 0.75rem;
+/* stylelint-disable selector-pseudo-class-no-unknown */
+
+.dashboard-media-grid {
+  flex: 1 1 auto;
+  min-block-size: 0;
+}
+
+.dashboard-media-grid :deep(.progressive-card-grid__track) {
+  min-block-size: 100%;
 }
 </style>

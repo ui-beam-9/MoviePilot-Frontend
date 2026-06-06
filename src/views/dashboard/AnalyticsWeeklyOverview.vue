@@ -131,31 +131,43 @@ onActivated(() => {
 </script>
 
 <template>
-  <VHover>
-    <template #default="hover">
-      <VCard v-bind="hover.props" class="dashboard-work-card">
-        <VCardItem>
-          <VCardTitle>{{ t('dashboard.weeklyOverview') }}</VCardTitle>
-        </VCardItem>
+  <VCard class="dashboard-work-card">
+    <VCardItem>
+      <VCardTitle>{{ t('dashboard.weeklyOverview') }}</VCardTitle>
+    </VCardItem>
 
-        <VCardText>
-          <VApexChart type="bar" :options="options" :series="series" :height="160" />
-          <div class="d-flex align-center mb-3">
-            <h5 class="text-h5 me-4">
-              {{ totalCount }}
-            </h5>
-            <p>{{ t('dashboard.weeklyOverviewDescription', { count: totalCount }) }} 😎</p>
-          </div>
+    <VCardText class="dashboard-work-content">
+      <div class="dashboard-work-chart">
+        <VApexChart type="bar" :options="options" :series="series" height="100%" />
+      </div>
+      <div class="d-flex align-center mb-3">
+        <h5 class="text-h5 me-4">
+          {{ totalCount }}
+        </h5>
+        <p>{{ t('dashboard.weeklyOverviewDescription', { count: totalCount }) }} 😎</p>
+      </div>
 
-          <VBtn v-if="superUser" block to="/history"> {{ t('common.viewDetails') }} </VBtn>
-        </VCardText>
-      </VCard>
-    </template>
-  </VHover>
+      <VBtn v-if="superUser" block to="/history"> {{ t('common.viewDetails') }} </VBtn>
+    </VCardText>
+  </VCard>
 </template>
 
 <style scoped>
-.dashboard-work-card {
-  min-block-size: 352px;
+.dashboard-work-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-block-size: 0;
+}
+
+.dashboard-work-chart {
+  flex: 1 1 auto;
+  min-block-size: 0;
+}
+
+.dashboard-work-chart :deep(.vue-apexcharts),
+.dashboard-work-chart :deep(.apexcharts-canvas),
+.dashboard-work-chart :deep(svg) {
+  block-size: 100% !important;
 }
 </style>

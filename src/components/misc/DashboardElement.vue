@@ -136,37 +136,52 @@ onUnmounted(() => {
   <!-- 插件仪表板 -->
   <template v-else-if="!isNullOrEmptyObject(props.config)">
     <!-- Vue 渲染模式 -->
-    <div v-if="pluginRenderMode === 'vue'">
+    <div v-if="pluginRenderMode === 'vue'" class="dashboard-plugin-vue-renderer">
       <component :is="dynamicPluginComponent" :config="props.config" :allow-refresh="props.allowRefresh" :api="api" />
     </div>
     <!-- Vuetify 渲染模式 -->
-    <VHover v-else-if="pluginRenderMode === 'vuetify'">
-      <template #default="hover">
-        <!-- 无边框 -->
-        <div v-if="props.config?.attrs.border === false">
-          <VCard v-bind="hover.props">
-            <VCardText class="p-0">
-              <DashboardRender v-for="(item, index) in props.config?.elements" :key="index" :config="item" />
-            </VCardText>
-          </VCard>
-        </div>
-        <!-- 有边框 -->
-        <VCard v-else v-bind="hover.props">
-          <VCardItem v-if="props.config?.attrs.border !== false">
-            <VCardTitle>
-              {{ props.config?.attrs?.title ?? props.config?.name }}
-            </VCardTitle>
-            <VCardSubtitle v-if="props.config?.attrs?.subtitle"> {{ props.config?.attrs?.subtitle }}</VCardSubtitle>
-          </VCardItem>
-          <VCardText>
+    <template v-else-if="pluginRenderMode === 'vuetify'">
+      <!-- 无边框 -->
+      <div v-if="props.config?.attrs.border === false">
+        <VCard>
+          <VCardText class="p-0">
             <DashboardRender v-for="(item, index) in props.config?.elements" :key="index" :config="item" />
           </VCardText>
         </VCard>
-      </template>
-    </VHover>
+      </div>
+      <!-- 有边框 -->
+      <VCard v-else>
+        <VCardItem v-if="props.config?.attrs.border !== false">
+          <VCardTitle>
+            {{ props.config?.attrs?.title ?? props.config?.name }}
+          </VCardTitle>
+          <VCardSubtitle v-if="props.config?.attrs?.subtitle"> {{ props.config?.attrs?.subtitle }}</VCardSubtitle>
+        </VCardItem>
+        <VCardText>
+          <DashboardRender v-for="(item, index) in props.config?.elements" :key="index" :config="item" />
+        </VCardText>
+      </VCard>
+    </template>
     <!-- 未知模式或错误 -->
     <VCard v-else>
       <VCardText>无法渲染插件仪表盘部件: 未知渲染模式或配置错误</VCardText>
     </VCard>
   </template>
 </template>
+
+<style scoped>
+/* stylelint-disable selector-pseudo-class-no-unknown */
+
+.dashboard-plugin-vue-renderer {
+  display: flex;
+  flex-direction: column;
+  block-size: 100%;
+  inline-size: 100%;
+  min-block-size: 0;
+}
+
+.dashboard-plugin-vue-renderer :deep(> *) {
+  flex: 1 1 auto;
+  min-block-size: 0;
+}
+</style>

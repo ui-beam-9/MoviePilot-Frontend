@@ -33,6 +33,7 @@ const DASHBOARD_GRID_COLUMNS = 12
 const DASHBOARD_GRID_CELL_HEIGHT = 16
 const DASHBOARD_GRID_FALLBACK_ROWS = 4
 const DASHBOARD_GRID_MARGIN = 8
+const DASHBOARD_GRID_CONTENT_RESIZE_THRESHOLD = 4
 const DASHBOARD_GRID_LAYOUT_STORAGE_KEY = 'MP_DASHBOARD_GRID_LAYOUT'
 
 interface DashboardGridLayoutItem {
@@ -66,11 +67,16 @@ const isSyncingDashboardGrid = ref(false)
 // 仪表板本地布局覆盖配置
 const dashboardGridLayout = ref<Record<string, DashboardGridLayoutItem>>({})
 
+// 是否刚恢复过默认布局，用于避免退出编辑时立即把默认布局写回本地覆盖。
+const isDashboardGridLayoutResetPending = ref(false)
+
 const dashboardGridResizeStartHeights = new Map<string, number | undefined>()
 const dashboardGridPendingContentResize = new Set<GridItemHTMLElement>()
+const dashboardGridObservedContentHeights = new Map<string, number>()
 
 let dashboardGridContentObserver: ResizeObserver | null = null
 let dashboardGridContentResizeFrame: number | null = null
+let dashboardGridResizeRefreshFrame: number | null = null
 
 // 是否正在手动缩放组件，避免自动测高抢回用户拖动中的高度。
 const isDashboardGridResizing = ref(false)
@@ -323,7 +329,6 @@ function openDashboardSettings() {
       hint: t('dashboard.chooseContent'),
       items: dashboardConfigs.value,
       labelGetter: (item: DashboardItem) => item.attrs?.title ?? item.name,
-      resetText: t('dashboard.resetLayout'),
       title: t('dashboard.settings'),
       valueGetter: (item: DashboardItem) => buildPluginDashboardId(item.id, item.key),
     },
@@ -331,7 +336,6 @@ function openDashboardSettings() {
       close: () => {
         settingsDialogController = null
       },
-      reset: resetDashboardGridLayout,
       save: saveDashboardConfig,
       'update:modelValue': (value: boolean) => {
         if (!value) settingsDialogController = null
@@ -346,6 +350,7 @@ function resetDashboardGridLayout() {
   dashboardGridLayout.value = {}
   localStorage.removeItem(DASHBOARD_GRID_LAYOUT_STORAGE_KEY)
   dashboardGrid.value?.removeAll(false, false)
+  isDashboardGridLayoutResetPending.value = true
   nextTick(syncDashboardGrid)
 }
 
@@ -353,20 +358,32 @@ function resetDashboardGridLayout() {
 const dashboardDynamicButtonMenuItems = computed<DynamicButtonMenuItem[] | undefined>(() => {
   if (!appMode.value) return undefined
 
-  return [
+  const items: DynamicButtonMenuItem[] = [
     {
       title: isLayoutEditing.value ? t('dashboard.exitEditMode') : t('dashboard.editLayout'),
       icon: isLayoutEditing.value ? 'mdi-check' : 'mdi-view-dashboard-edit',
       color: 'primary',
       action: toggleDashboardLayoutEditing,
     },
-    {
-      title: t('dashboard.settings'),
-      icon: 'mdi-tune',
-      color: 'info',
-      action: openDashboardSettings,
-    },
   ]
+
+  if (isLayoutEditing.value) {
+    items.push({
+      title: t('dashboard.resetLayout'),
+      icon: 'mdi-restore',
+      color: 'warning',
+      action: resetDashboardGridLayout,
+    })
+  }
+
+  items.push({
+    title: t('dashboard.settings'),
+    icon: 'mdi-tune',
+    color: 'info',
+    action: openDashboardSettings,
+  })
+
+  return items
 })
 
 useDynamicButton({
@@ -378,11 +395,16 @@ useDynamicButton({
 // 切换仪表板布局编辑模式，退出编辑时压实并保存当前布局。
 function toggleDashboardLayoutEditing() {
   if (isLayoutEditing.value) {
-    compactAndPersistDashboardGrid()
+    if (isDashboardGridLayoutResetPending.value) {
+      isDashboardGridLayoutResetPending.value = false
+    } else {
+      compactAndPersistDashboardGrid()
+    }
     isLayoutEditing.value = false
     return
   }
 
+  isDashboardGridLayoutResetPending.value = false
   isLayoutEditing.value = true
   nextTick(syncDashboardGrid)
 }
@@ -590,6 +612,7 @@ function initializeDashboardGrid() {
 
   dashboardGrid.value.on('dragstop', handleDashboardGridDragStop)
   dashboardGrid.value.on('resizestart', handleDashboardGridResizeStart)
+  dashboardGrid.value.on('resize', handleDashboardGridResize)
   dashboardGrid.value.on('resizestop', handleDashboardGridResizeStop)
   updateDashboardGridEditableState(isLayoutEditing.value)
   syncDashboardGrid()
@@ -674,16 +697,34 @@ function observeDashboardGridContent() {
   if (!gridElement || typeof ResizeObserver === 'undefined') return
 
   dashboardGridContentObserver?.disconnect()
+  dashboardGridPendingContentResize.clear()
+  dashboardGridObservedContentHeights.clear()
   dashboardGridContentObserver = new ResizeObserver(entries => {
     entries.forEach(entry => {
       const itemElement = entry.target.closest('.dashboard-grid-item') as GridItemHTMLElement | null
-      if (itemElement) scheduleDashboardItemContentResize(itemElement)
+      if (itemElement && shouldScheduleDashboardContentResize(itemElement, entry.contentRect.height)) {
+        scheduleDashboardItemContentResize(itemElement)
+      }
     })
   })
 
   gridElement.querySelectorAll<HTMLElement>('.dashboard-grid-auto-size').forEach(element => {
     dashboardGridContentObserver?.observe(element)
   })
+}
+
+// 判断内容高度变化是否足够触发 GridStack 行高重算，避免 hover 级微小波动造成布局抖动。
+function shouldScheduleDashboardContentResize(element: GridItemHTMLElement, nextHeight: number) {
+  const id = element.getAttribute('gs-id') ?? ''
+  if (!id) return true
+
+  const previousHeight = dashboardGridObservedContentHeights.get(id)
+  dashboardGridObservedContentHeights.set(id, nextHeight)
+
+  return (
+    previousHeight === undefined ||
+    Math.abs(nextHeight - previousHeight) >= DASHBOARD_GRID_CONTENT_RESIZE_THRESHOLD
+  )
 }
 
 // 延迟执行单个组件内容测高，合并连续 ResizeObserver 回调。
@@ -724,6 +765,12 @@ function handleDashboardGridResizeStart(_event: Event, element: GridItemHTMLElem
 
   isDashboardGridResizing.value = true
   dashboardGridResizeStartHeights.set(id, element.gridstackNode?.h)
+  notifyDashboardContentResize()
+}
+
+// 在用户缩放过程中通知图表、虚拟网格等内容重新读取容器尺寸。
+function handleDashboardGridResize() {
+  notifyDashboardContentResize()
 }
 
 // 保存用户拖动后的位置，并保持未手动调高组件继续按内容自适应。
@@ -740,7 +787,18 @@ function handleDashboardGridResizeStop(_event: Event, element: GridItemHTMLEleme
 
   dashboardGridResizeStartHeights.delete(id)
   isDashboardGridResizing.value = false
+  notifyDashboardContentResize()
   compactAndPersistDashboardGrid(heightChanged ? id : false)
+}
+
+// 合并连续 resize 通知，模拟浏览器窗口变化让组件内部内容自适配新尺寸。
+function notifyDashboardContentResize() {
+  if (typeof window === 'undefined' || dashboardGridResizeRefreshFrame !== null) return
+
+  dashboardGridResizeRefreshFrame = window.requestAnimationFrame(() => {
+    dashboardGridResizeRefreshFrame = null
+    window.dispatchEvent(new Event('resize'))
+  })
 }
 
 // 将 GridStack 保存结果归一化为本地布局覆盖表。
@@ -786,6 +844,7 @@ function getDefaultDashboardGridWidthById(id: string) {
 function compactAndPersistDashboardGrid(manualHeightId: string | false = false) {
   if (!dashboardGrid.value || isSyncingDashboardGrid.value) return
 
+  isDashboardGridLayoutResetPending.value = false
   dashboardGrid.value.compact('compact')
   nextTick(() => persistDashboardGridLayout(manualHeightId))
 }
@@ -831,7 +890,12 @@ onBeforeUnmount(() => {
     cancelAnimationFrame(dashboardGridContentResizeFrame)
     dashboardGridContentResizeFrame = null
   }
+  if (dashboardGridResizeRefreshFrame !== null) {
+    cancelAnimationFrame(dashboardGridResizeRefreshFrame)
+    dashboardGridResizeRefreshFrame = null
+  }
   dashboardGridPendingContentResize.clear()
+  dashboardGridObservedContentHeights.clear()
   dashboardGridResizeStartHeights.clear()
   dashboardGrid.value?.destroy(false)
   dashboardGrid.value = null
@@ -883,6 +947,15 @@ onBeforeUnmount(() => {
         @click="openDashboardSettings"
       />
       <VFab
+        v-if="isLayoutEditing"
+        icon="mdi-restore"
+        color="warning"
+        variant="tonal"
+        appear
+        class="compact-fab compact-fab--secondary"
+        @click="resetDashboardGridLayout"
+      />
+      <VFab
         :icon="isLayoutEditing ? 'mdi-check' : 'mdi-view-dashboard-edit'"
         color="primary"
         appear
@@ -898,6 +971,17 @@ onBeforeUnmount(() => {
 
 .dashboard-grid {
   margin-block: -6px 0;
+}
+
+.dashboard-grid :deep(.v-card) {
+  overflow: hidden;
+  box-shadow: var(--app-surface-shadow) !important;
+}
+
+@media (hover: hover) {
+  .dashboard-grid :deep(.v-card:hover) {
+    box-shadow: var(--app-surface-hover-shadow) !important;
+  }
 }
 
 .dashboard-grid-item.is-manual-height :deep(.v-card) {
@@ -926,6 +1010,39 @@ onBeforeUnmount(() => {
 
 .dashboard-grid.is-editing :deep(.v-card) {
   block-size: 100%;
+}
+
+.dashboard-grid :deep(.dashboard-chart-card),
+.dashboard-grid :deep(.dashboard-summary-card),
+.dashboard-grid :deep(.dashboard-work-card),
+.dashboard-grid :deep(.dashboard-media-card) {
+  display: flex;
+  flex-direction: column;
+  min-block-size: 0;
+}
+
+.dashboard-grid :deep(.dashboard-chart-card .v-card-text),
+.dashboard-grid :deep(.dashboard-work-card .v-card-text),
+.dashboard-grid :deep(.dashboard-card-grid-wrap) {
+  flex: 1 1 auto;
+  min-block-size: 0;
+}
+
+.dashboard-grid:not(.is-editing) .dashboard-grid-item:not(.is-manual-height) :deep(.dashboard-summary-card) {
+  min-block-size: 160px;
+}
+
+.dashboard-grid:not(.is-editing) .dashboard-grid-item:not(.is-manual-height) :deep(.dashboard-chart-card) {
+  min-block-size: 256px;
+}
+
+.dashboard-grid:not(.is-editing) .dashboard-grid-item:not(.is-manual-height) :deep(.dashboard-work-card) {
+  min-block-size: 352px;
+}
+
+.dashboard-grid.is-editing :deep(.v-card-text),
+.dashboard-grid-item.is-manual-height :deep(.v-card-text) {
+  overflow: auto;
 }
 
 .dashboard-grid-drag-handle {
