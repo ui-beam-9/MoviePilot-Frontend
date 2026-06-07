@@ -651,10 +651,8 @@ onUnmounted(() => {
   --logging-shell-bg: rgba(var(--v-theme-surface), 0.96);
   --logging-record-bg-even: rgba(var(--v-theme-surface-variant), 0.01);
   --logging-record-bg-odd: rgba(var(--v-theme-surface-variant), 0.005);
-  --logging-border: rgba(var(--v-theme-on-surface), 0.08);
   --logging-text: rgba(var(--v-theme-on-surface), 0.88);
   --logging-muted: rgba(var(--v-theme-on-surface), 0.56);
-  --logging-shadow: 0 10px 32px rgba(15, 23, 42, 6%);
 
   display: flex;
   flex-direction: column;
@@ -699,7 +697,7 @@ onUnmounted(() => {
 }
 
 .logging-search :deep(.v-field) {
-  border-radius: 0;
+  border-radius: var(--app-field-radius);
   background: transparent !important;
   box-shadow: none !important;
 }
@@ -719,7 +717,7 @@ onUnmounted(() => {
 }
 
 .logging-level-select :deep(.v-field) {
-  border-radius: 0;
+  border-radius: var(--app-field-radius);
   background: transparent !important;
   box-shadow: none !important;
 }

@@ -4,7 +4,6 @@ import type { FileItem } from '@/api/types'
 import { useDisplay } from 'vuetify'
 import type { AxiosRequestConfig, AxiosInstance } from 'axios'
 import { useI18n } from 'vue-i18n'
-import { usePWA } from '@/composables/usePWA'
 import { useAvailableHeight } from '@/composables/useAvailableHeight'
 
 // 国际化
@@ -12,16 +11,13 @@ const { t } = useI18n()
 
 const display = useDisplay()
 
-const { appMode } = usePWA()
-
 type TreeRow =
   | { type: 'root'; key: string; level: number }
   | { type: 'loading'; key: string; path: string; level: number }
   | { type: 'directory'; key: string; dir: FileItem; level: number }
 
 // 计算列表可用高度
-// componentOffset = FileToolbar(48) = 48
-const { availableHeight } = useAvailableHeight(48, 300)
+const { availableHeight } = useAvailableHeight(58, 300)
 
 // 输入参数
 const props = defineProps({
@@ -116,7 +112,7 @@ async function loadSubdirectories(path: string) {
       data: fakeItem,
     }
 
-    const result = (await props.axios?.request(config))
+    const result = await props.axios?.request(config)
     if (result && Array.isArray(result)) {
       // 过滤出目录项
       const dirs = result.filter(item => item.type === 'dir')
@@ -249,7 +245,6 @@ function getTreeRowStyle(level: number) {
 onMounted(async () => {
   await loadRootDirectories()
 })
-
 </script>
 
 <template>
@@ -296,13 +291,7 @@ onMounted(async () => {
           :style="getTreeRowStyle(item.level)"
         >
           <div class="folder-toggle" @click.stop="toggleFolder(item.dir.path || '')">
-            <VProgressCircular
-              v-if="loading[item.dir.path || '']"
-              indeterminate
-              size="14"
-              width="2"
-              color="primary"
-            />
+            <VProgressCircular v-if="loading[item.dir.path || '']" indeterminate size="14" width="2" color="primary" />
             <VIcon
               v-else
               size="small"
@@ -332,9 +321,9 @@ onMounted(async () => {
   overflow: hidden;
   flex-direction: column;
   flex-shrink: 0;
-  background: rgb(var(--v-table-header-background));
+  border-radius: 0 !important;
   block-size: 100%;
-  border-end-start-radius: 12px;
+  box-shadow: none !important;
   inline-size: 240px;
 }
 

@@ -109,7 +109,14 @@ function submitSettings() {
 </script>
 
 <template>
-  <VDialog v-if="visible" v-model="visible" width="35rem" class="settings-dialog" scrollable :fullscreen="!display.mdAndUp.value">
+  <VDialog
+    v-if="visible"
+    v-model="visible"
+    width="35rem"
+    class="settings-dialog"
+    scrollable
+    :fullscreen="!display.mdAndUp.value"
+  >
     <VCard class="settings-card">
       <VCardItem class="settings-card-header">
         <VCardTitle>
@@ -195,7 +202,6 @@ function submitSettings() {
 .setting-item {
   position: relative;
   overflow: hidden;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.1);
   border-radius: var(--app-surface-radius);
   background-color: rgba(var(--v-theme-surface-variant), 0.3);
   cursor: pointer;
